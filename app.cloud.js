@@ -1,3 +1,4 @@
+import './vendor/pdf.mjs';
 import { initCinema } from './cinema.js';
 const $=id=>document.getElementById(id);
 const ids=['title','author','width','height','count','paper','caliper','gsm','binding','finish','board','endpapers','bleed','safe','gutter','sourceSize'];
