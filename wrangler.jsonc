@@ -9,18 +9,5 @@
     "directory": "./public",
     "binding": "ASSETS",
     "run_worker_first": ["/api/*"]
-  },
-  "browser": {
-    "binding": "BROWSER"
-  },
-  "r2_buckets": [
-    {
-      "binding": "BOOK_FILES"
-    }
-  ],
-  "kv_namespaces": [
-    {
-      "binding": "BOOK_JOBS"
-    }
-  ]
+  }
 }
