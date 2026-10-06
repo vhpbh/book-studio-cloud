@@ -23,7 +23,22 @@ function calculate(body={}){
 const CONTROL_VISIBILITY_PATCH=`<style id="book-control-visibility-fix">
 :where(button,[role="button"],input[type="button"],input[type="submit"]):not(:disabled):not([aria-disabled="true"]){opacity:1!important;filter:none!important}
 :where(button,input[type="button"],input[type="submit"]):disabled,[role="button"][aria-disabled="true"]{opacity:.34!important;filter:saturate(.45)!important;cursor:not-allowed!important}
-#prev:not(:disabled),#next:not(:disabled),#fit:not(:disabled),#go:not(:disabled){color:#45606d!important}
+
+/* Material 3 contrast repair: old dark-theme selectors were winning by specificity. */
+.viewer-controls{color:var(--md-on-surface,#1b1c1d)!important}
+.viewer-controls :where(label,output){color:var(--md-on-surface,#1b1c1d)!important}
+.page-navigation>span,#pageLabel{color:var(--md-on-surface,#1b1c1d)!important}
+.zoom-control output,#zoomValue{color:var(--md-on-surface,#1b1c1d)!important;font-weight:700!important}
+.timeline,.timeline>span{color:var(--md-on-surface,#1b1c1d)!important}
+.reader-controls .text-button,.shelf-controls .text-button{color:var(--md-primary,#355f72)!important}
+.reader-controls .icon-button{background:transparent!important;border-color:transparent!important;color:var(--md-on-surface-variant,#46545d)!important}
+.reader-controls .icon-button:not(:disabled):hover{background:var(--md-surface-container-high,#e7ecef)!important}
+.jump-control input{background:var(--md-surface-container-lowest,#fff)!important;border:1px solid var(--md-outline,#73777a)!important;color:var(--md-on-surface,#1b1c1d)!important;opacity:1!important}
+.jump-control input:focus{outline:2px solid color-mix(in srgb,var(--md-primary,#355f72) 35%,transparent)!important;outline-offset:1px}
+.shelf-controls label{color:var(--md-on-surface,#1b1c1d)!important}
+
+#prev:not(:disabled),#next:not(:disabled){color:var(--md-on-surface-variant,#46545d)!important}
+#fit:not(:disabled),#go:not(:disabled){color:var(--md-primary,#355f72)!important}
 #prev:not(:disabled) svg,#next:not(:disabled) svg,#fit:not(:disabled) svg,#go:not(:disabled) svg{opacity:1!important}
 </style>`;
 function validSupabaseSignedUrl(value){
@@ -45,5 +60,5 @@ async function handleStorageNotify(request,env){
  if(!['manuscript','front','wrap'].includes(String(body.kind||'')))return errorJson('סוג העלאה לא מוכר');
  try{const resendId=await sendResendLink(env,body);return safeJson({ok:true,emailSent:true,resendId})}catch(e){return errorJson(e.message||e,500)}
 }
-async function route(request,env){const url=new URL(request.url);if(request.method==='OPTIONS')return new Response(null,{status:204,headers:JSON_HEADERS});if(url.pathname==='/api/health')return safeJson({ok:true,service:'book-studio-cloud-free',storage:'supabase',movieCloud:false,build:'UI-CONTROL-FIX-V7',time:new Date().toISOString()});if(url.pathname==='/api/calc'&&request.method==='POST'){try{return safeJson({ok:true,calc:calculate(await request.json())})}catch(e){return errorJson(e.message||e)}}if(url.pathname==='/api/storage-notify'&&request.method==='POST')return handleStorageNotify(request,env);return null}
-export default {async fetch(request,env){try{const api=await route(request,env);if(api)return api;if(env.ASSETS){const r=await env.ASSETS.fetch(request);const h=new Headers(r.headers);h.set('cache-control','no-store');h.set('x-book-build','UI-CONTROL-FIX-V7');const ct=h.get('content-type')||'';if(ct.includes('text/html')){let html=await r.text();html=html.replace('const PDFJS = PDFJS_MODULE;','const PDFJS = PDFJS_MODULE;if(PDFJS?.GlobalWorkerOptions&&window.__pdfWorkerURL)PDFJS.GlobalWorkerOptions.workerSrc=window.__pdfWorkerURL;');html=html.replace('</head>',CONTROL_VISIBILITY_PATCH+'</head>');h.delete('content-length');return new Response(html,{status:r.status,statusText:r.statusText,headers:h});}return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h});}return new Response('Book Studio',{headers:{'content-type':'text/plain; charset=utf-8'}})}catch(e){console.error(e);return errorJson(e.message||'Internal error',500)}}};
+async function route(request,env){const url=new URL(request.url);if(request.method==='OPTIONS')return new Response(null,{status:204,headers:JSON_HEADERS});if(url.pathname==='/api/health')return safeJson({ok:true,service:'book-studio-cloud-free',storage:'supabase',movieCloud:false,build:'UI-CONTRAST-FIX-V8',time:new Date().toISOString()});if(url.pathname==='/api/calc'&&request.method==='POST'){try{return safeJson({ok:true,calc:calculate(await request.json())})}catch(e){return errorJson(e.message||e)}}if(url.pathname==='/api/storage-notify'&&request.method==='POST')return handleStorageNotify(request,env);return null}
+export default {async fetch(request,env){try{const api=await route(request,env);if(api)return api;if(env.ASSETS){const r=await env.ASSETS.fetch(request);const h=new Headers(r.headers);h.set('cache-control','no-store');h.set('x-book-build','UI-CONTRAST-FIX-V8');const ct=h.get('content-type')||'';if(ct.includes('text/html')){let html=await r.text();html=html.replace('const PDFJS = PDFJS_MODULE;','const PDFJS = PDFJS_MODULE;if(PDFJS?.GlobalWorkerOptions&&window.__pdfWorkerURL)PDFJS.GlobalWorkerOptions.workerSrc=window.__pdfWorkerURL;');html=html.replace('</head>',CONTROL_VISIBILITY_PATCH+'</head>');h.delete('content-length');return new Response(html,{status:r.status,statusText:r.statusText,headers:h});}return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h});}return new Response('Book Studio',{headers:{'content-type':'text/plain; charset=utf-8'}})}catch(e){console.error(e);return errorJson(e.message||'Internal error',500)}}};
