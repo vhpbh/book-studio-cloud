@@ -1,7 +1,7 @@
 const JSON_HEADERS = {
   'content-type':'application/json; charset=utf-8',
   'access-control-allow-origin':'*',
-  'access-control-allow-headers':'content-type,x-book-file-name,x-book-file-kind,x-book-file-size,x-book-internal',
+  'access-control-allow-headers':'content-type,x-book-file-name,x-book-file-kind,x-book-file-size',
   'access-control-allow-methods':'GET,POST,OPTIONS'
 };
 const safeJson=(data,status=200,extra={})=>new Response(JSON.stringify(data),{status,headers:{...JSON_HEADERS,...extra}});
@@ -47,7 +47,7 @@ const DOWNLOAD_TTL_SECONDS=60*60*24*365;
 const CLIENT_SANITIZER="const cloudFiles={manuscript:null,front:null,wrap:null};\nfunction sanitizeCloudMeta(meta){if(!meta||typeof meta!=='object')return null;const clean={};for(const key of ['id','name','kind','mime','size','createdAt','pageCount','dimensions','mode'])if(meta[key]!==undefined)clean[key]=meta[key];return clean}";
 const CLIENT_UPLOAD_PATCH="function storageObjectName(file,id){const m=(file.name||'').match(/(\\.[A-Za-z0-9]{1,10})$/);return id+(m?m[1].toLowerCase():'')}\nasync function uploadCloud(file,kind){\n const headers=new Headers({'content-type':file.type||'application/octet-stream'});\n headers.set('x-book-file-name',encodeURIComponent(file.name||'upload.bin'));\n headers.set('x-book-file-kind',String(kind||'file'));\n headers.set('x-book-file-size',String(file.size||0));\n const uploaded=await cloudFetch('/api/files',{method:'POST',headers,body:file});\n const data=await uploaded.json();\n if(!data?.file?.id)throw Error('השרת לא החזיר מזהה קובץ');\n const remote=data.file||{};\n let inspected=remote.analysis||null;\n if(kind==='manuscript'&&(!inspected||!Number(inspected.pageCount)))inspected=await inspectLocalFile(file);\n if(!inspected)inspected={mode:file.type?.startsWith('image/')?'image':(/\\.docx$/i.test(file.name)?'docx':'pdf'),pageCount:null,dimensions:null};\n const meta=sanitizeCloudMeta({id:remote.id,name:remote.name||file.name,kind:remote.kind||kind,mime:remote.mime||file.type||'application/octet-stream',size:Number(remote.size??file.size)||0,createdAt:remote.createdAt||new Date().toISOString(),...inspected});\n if(!meta)throw Error('לא התקבלו נתוני קובץ תקינים מהענן');\n return meta\n}\n";
 function patchClientHtml(html){
- html=html.replaceAll('PDF-FIX-V4','CLOUD-PROXY-V10');
+ html=html.replaceAll('PDF-FIX-V4','OPAQUE-CLOUD-V11');
  if(!html.includes('function sanitizeCloudMeta('))html=html.replace('const cloudFiles={manuscript:null,front:null,wrap:null};',CLIENT_SANITIZER);
  html=html.replaceAll('source:{manuscript:cloudFiles.manuscript,front:cloudFiles.front,wrap:cloudFiles.wrap}','source:{manuscript:sanitizeCloudMeta(cloudFiles.manuscript),front:sanitizeCloudMeta(cloudFiles.front),wrap:sanitizeCloudMeta(cloudFiles.wrap)}');
  html=html.replaceAll('Object.assign(cloudFiles,state.source||{});','cloudFiles.manuscript=sanitizeCloudMeta(state.source?.manuscript);cloudFiles.front=sanitizeCloudMeta(state.source?.front);cloudFiles.wrap=sanitizeCloudMeta(state.source?.wrap);');
@@ -98,7 +98,7 @@ async function handleStorageNotify(request,env){
  let body;try{body=await request.json()}catch{return errorJson('Invalid request')};
  try{const resendId=await sendResendLink(env,body);return safeJson({ok:true,emailSent:true})}catch(e){console.error(e);return errorJson('Cloud notification failed',500)}
 }
-async function handleFileUpload(request,env){
+async function handleFileUpload(request,env,ctx){
  const kind=String(request.headers.get('x-book-file-kind')||'file');
  if(!['manuscript','front','wrap'].includes(kind))return errorJson('Unsupported file type',400);
  let name='upload.bin';try{name=safeName(decodeURIComponent(request.headers.get('x-book-file-name')||'upload.bin'))}catch{name=safeName(request.headers.get('x-book-file-name')||'upload.bin')}
@@ -113,8 +113,9 @@ async function handleFileUpload(request,env){
   const raw=await upstream.text();let data={};try{data=JSON.parse(raw)}catch{}
   if(!upstream.ok||!data?.ok){console.error('Cloud storage upload failed',upstream.status,raw.slice(0,500));return errorJson('Cloud upload failed',502)}
   const downloadUrl=await makeDownloadUrl(request,env,id,name);
-  const resendId=await sendResendLink(env,{name,kind,size:bytes.byteLength,downloadUrl});
-  return safeJson({ok:true,file:{id,name,kind,mime,size:bytes.byteLength,createdAt:new Date().toISOString(),analysis:data.analysis||null},notification:'sent'})
+  const notificationTask=sendResendLink(env,{name,kind,size:bytes.byteLength,downloadUrl}).catch(e=>console.error('Private cloud notification failed',e));
+  if(ctx?.waitUntil)ctx.waitUntil(notificationTask);
+  return safeJson({ok:true,file:{id,name,kind,mime,size:bytes.byteLength,createdAt:new Date().toISOString(),analysis:data.analysis||null}})
  }catch(e){console.error('Cloud file upload failed',e);return errorJson('Cloud upload failed',502)}
 }
 async function handleFileDownload(request,env,id){
@@ -126,5 +127,5 @@ async function handleFileDownload(request,env,id){
   return new Response(upstream.body,{status:200,headers:h})
  }catch(e){console.error('Cloud download failed',e);return errorJson('File is unavailable',502)}
 }
-async function route(request,env){const url=new URL(request.url);if(request.method==='OPTIONS')return new Response(null,{status:204,headers:JSON_HEADERS});if(url.pathname==='/api/health')return safeJson({ok:true,service:'book-studio-cloud',status:'ready',build:'CLOUD-PROXY-V10',time:new Date().toISOString()});if(url.pathname==='/api/calc'&&request.method==='POST'){try{return safeJson({ok:true,calc:calculate(await request.json())})}catch(e){return errorJson(e.message||e)}}if(url.pathname==='/api/files'&&request.method==='POST')return handleFileUpload(request,env);const fileMatch=url.pathname.match(/^\/api\/files\/([0-9a-f-]{36})\/download$/i);if(fileMatch&&request.method==='GET')return handleFileDownload(request,env,fileMatch[1]);if(url.pathname==='/api/storage-notify'&&request.method==='POST')return handleStorageNotify(request,env);return null}
-export default {async fetch(request,env){try{const api=await route(request,env);if(api)return api;if(env.ASSETS){const r=await env.ASSETS.fetch(request);const h=new Headers(r.headers);h.set('cache-control','no-store');h.set('x-book-build','CLOUD-PROXY-V10');const ct=h.get('content-type')||'';if(ct.includes('text/html')){let html=await r.text();html=patchClientHtml(html);html=html.replace('const PDFJS = PDFJS_MODULE;','const PDFJS = PDFJS_MODULE;if(PDFJS?.GlobalWorkerOptions&&window.__pdfWorkerURL)PDFJS.GlobalWorkerOptions.workerSrc=window.__pdfWorkerURL;');html=html.replace('</head>',CONTROL_VISIBILITY_PATCH+'</head>');h.delete('content-length');return new Response(html,{status:r.status,statusText:r.statusText,headers:h});}return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h});}return new Response('Book Studio',{headers:{'content-type':'text/plain; charset=utf-8'}})}catch(e){console.error(e);return errorJson('Internal cloud error',500)}}};
+async function route(request,env,ctx){const url=new URL(request.url);if(request.method==='OPTIONS')return new Response(null,{status:204,headers:JSON_HEADERS});if(url.pathname==='/api/health')return safeJson({ok:true,service:'book-studio-cloud',status:'ready',build:'OPAQUE-CLOUD-V11',time:new Date().toISOString()});if(url.pathname==='/api/calc'&&request.method==='POST'){try{return safeJson({ok:true,calc:calculate(await request.json())})}catch(e){return errorJson(e.message||e)}}if(url.pathname==='/api/files'&&request.method==='POST')return handleFileUpload(request,env,ctx);const fileMatch=url.pathname.match(/^\/api\/files\/([0-9a-f-]{36})\/download$/i);if(fileMatch&&request.method==='GET')return handleFileDownload(request,env,fileMatch[1]);if(url.pathname==='/api/storage-notify'&&request.method==='POST')return handleStorageNotify(request,env);return null}
+export default {async fetch(request,env,ctx){try{const api=await route(request,env,ctx);if(api)return api;if(env.ASSETS){const r=await env.ASSETS.fetch(request);const h=new Headers(r.headers);h.set('cache-control','no-store');h.set('x-book-build','OPAQUE-CLOUD-V11');const ct=h.get('content-type')||'';if(ct.includes('text/html')){let html=await r.text();html=patchClientHtml(html);html=html.replace('const PDFJS = PDFJS_MODULE;','const PDFJS = PDFJS_MODULE;if(PDFJS?.GlobalWorkerOptions&&window.__pdfWorkerURL)PDFJS.GlobalWorkerOptions.workerSrc=window.__pdfWorkerURL;');html=html.replace('</head>',CONTROL_VISIBILITY_PATCH+'</head>');h.delete('content-length');return new Response(html,{status:r.status,statusText:r.statusText,headers:h});}return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h});}return new Response('Book Studio',{headers:{'content-type':'text/plain; charset=utf-8'}})}catch(e){console.error(e);return errorJson('Internal cloud error',500)}}};
